@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isFamilyMember(profileId) {
+      return request.auth != null &&
+        request.auth.uid in get(/databases/$(database)/documents/seniorProfiles/$(profileId)).data.members;
+    }
+    function isLinkedDevice(profileId) {
+      return request.auth != null &&
+        request.auth.uid in get(/databases/$(database)/documents/seniorProfiles/$(profileId)).data.linkedDeviceUids;
+    }
+    function hasAccess(profileId) {
+      return isFamilyMember(profileId) || isLinkedDevice(profileId);
+    }
+
+    // One doc per senior being tracked. `members` = family accounts with
+    // full dashboard access. `linkedDeviceUids` = anonymous-auth UIDs of
+    // devices (the senior's own phone/tablet) that connected via an
+    // invite code — read/log access only, can't manage medications.
+    match /seniorProfiles/{profileId} {
+      allow read: if hasAccess(profileId);
+      allow create: if request.auth != null &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.members == [request.auth.uid] &&
+        (!('linkedDeviceUids' in request.resource.data) || request.resource.data.linkedDeviceUids == []);
+      // Family members can update anything (add family, rename, etc).
+      // Two narrow self-service exceptions for signed-in-but-not-yet-a-
+      // member users, both gated on already knowing a real invite code
+      // (see inviteCodes below) — this clause just allows the resulting
+      // write once that code has been resolved client-side:
+      //  1. A senior's device (anonymous auth) adding its own UID to
+      //     linkedDeviceUids — read/log access only.
+      //  2. A family member (phone-auth'd) adding themselves to members
+      //     via a family invite code — full dashboard access.
+      allow update: if isFamilyMember(profileId) || (
+        request.auth != null &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linkedDeviceUids']) &&
+        request.resource.data.linkedDeviceUids.size() == resource.data.linkedDeviceUids.size() + 1 &&
+        request.auth.uid in request.resource.data.linkedDeviceUids
+      ) || (
+        request.auth != null &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']) &&
+        request.resource.data.members.size() == resource.data.members.size() + 1 &&
+        request.auth.uid in request.resource.data.members
+      );
+      allow delete: if isFamilyMember(profileId);
+
+      // Medication schedule — only family manages this, never the senior's
+      // own device, so a confused tap can't silently change a dosage.
+      match /medications/{medId} {
+        allow read: if hasAccess(profileId);
+        allow write: if isFamilyMember(profileId);
+      }
+
+      // "Taken" logs — the senior's device is the one actually writing
+      // these day to day, family can also log manually (e.g. if they
+      // administered it themselves on a visit).
+      match /medicationLogs/{logId} {
+        allow read: if hasAccess(profileId);
+        allow create, update: if hasAccess(profileId);
+        allow delete: if isFamilyMember(profileId);
+      }
+    }
+
+    // Short human-typeable codes → profileId lookup. Two flavors, both
+    // resolved client-side against this same collection:
+    //  - type: 'device'  — used once by senior-reminder.html to link a
+    //    senior's own phone/tablet (adds to linkedDeviceUids).
+    //  - type: 'family'  — shared with relatives to give them full
+    //    dashboard access (adds to members).
+    // Public read is required here since, in both cases, the joining user
+    // isn't a member/linked device yet and so can't read seniorProfiles
+    // directly. This doc intentionally exposes nothing beyond the
+    // profileId and type. Once created, it's immutable from the client;
+    // regenerate a new code (new doc) rather than editing one.
+    match /inviteCodes/{code} {
+      allow read: if true;
+      allow create: if request.auth != null &&
+        request.resource.data.keys().hasOnly(['profileId', 'type', 'createdBy', 'createdAt']) &&
+        request.resource.data.type in ['device', 'family'] &&
+        request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+  }
+}

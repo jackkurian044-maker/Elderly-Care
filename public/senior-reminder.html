@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Elderly Care — Today's Medicines</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #FBF7EF;
+    --ink: #2B2B24;
+    --ink-soft: #5C5A4E;
+    --card: #FFFFFF;
+    --card-border: #E7E0CF;
+    --primary: #3D6B52;      /* untaken dose — calm forest green */
+    --primary-dark: #2C4E3C;
+    --taken: #C9A227;        /* taken confirmation — muted gold */
+    --taken-bg: #FBF3DC;
+    --missed: #B23A2E;       /* sparing use only */
+    --glow-morning: radial-gradient(ellipse 900px 400px at 50% -120px, #F7D896 0%, transparent 70%);
+    --glow-afternoon: radial-gradient(ellipse 900px 400px at 50% -120px, #E9F0EA 0%, transparent 70%);
+    --glow-evening: radial-gradient(ellipse 900px 400px at 50% -120px, #C9BCE8 0%, transparent 70%);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Atkinson Hyperlegible', system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  .glow {
+    position: fixed; top: 0; left: 0; right: 0; height: 320px;
+    pointer-events: none; z-index: 0;
+  }
+  .wrap { position: relative; z-index: 1; max-width: 640px; margin: 0 auto; padding: 28px 20px 60px; }
+
+  /* ---- Setup / device-link screen ---- */
+  .setup { min-height: 90vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
+  .setup h1 { font-size: 32px; margin: 0 0 10px; }
+  .setup p { font-size: 20px; color: var(--ink-soft); max-width: 420px; line-height: 1.5; margin: 0 0 30px; }
+  .code-input {
+    width: 100%; max-width: 320px; font-family: 'IBM Plex Mono', monospace;
+    font-size: 32px; letter-spacing: 0.15em; text-align: center; text-transform: uppercase;
+    padding: 18px 10px; border-radius: 14px; border: 2.5px solid var(--card-border);
+    background: var(--card); color: var(--ink); margin-bottom: 20px;
+  }
+  .code-input:focus { outline: 3px solid var(--primary); border-color: var(--primary); }
+  .big-btn {
+    font-family: inherit; font-size: 22px; font-weight: 700; cursor: pointer;
+    border: none; border-radius: 16px; padding: 20px 36px; width: 100%; max-width: 320px;
+    background: var(--primary); color: #fff; transition: background 0.15s;
+  }
+  .big-btn:active { background: var(--primary-dark); }
+  .setup-error { color: var(--missed); font-size: 17px; margin-top: 14px; min-height: 24px; }
+
+  /* ---- Main reminder screen ---- */
+  .date-header { text-align: center; margin-bottom: 26px; }
+  .date-header .day { font-size: 40px; font-weight: 700; margin: 0; }
+  .date-header .date { font-size: 20px; color: var(--ink-soft); margin: 4px 0 0; font-family: 'IBM Plex Mono', monospace; }
+
+  .dose-card {
+    background: var(--card); border: 2.5px solid var(--card-border); border-radius: 20px;
+    padding: 22px; margin-bottom: 18px; display: flex; align-items: center; gap: 18px;
+  }
+  .dose-card.is-taken { background: var(--taken-bg); border-color: var(--taken); }
+  .dose-time {
+    font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 500;
+    background: var(--bg); border-radius: 12px; padding: 10px 14px; text-align: center;
+    min-width: 96px; flex-shrink: 0;
+  }
+  .dose-info { flex: 1; min-width: 0; }
+  .dose-name { font-size: 24px; font-weight: 700; line-height: 1.2; }
+  .dose-dosage { font-size: 18px; color: var(--ink-soft); margin-top: 2px; }
+  .dose-btn {
+    font-family: inherit; font-size: 18px; font-weight: 700; cursor: pointer;
+    border: none; border-radius: 14px; padding: 16px 20px; flex-shrink: 0; white-space: nowrap;
+    background: var(--primary); color: #fff;
+  }
+  .dose-btn:active { background: var(--primary-dark); }
+  .dose-btn.taken-label {
+    background: var(--taken); color: #fff; cursor: default;
+  }
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--ink-soft); font-size: 20px; }
+  .loading-state { text-align: center; padding: 60px 20px; color: var(--ink-soft); font-size: 20px; }
+</style>
+</head>
+<body>
+
+<div class="glow" id="timeGlow"></div>
+<div class="wrap">
+
+  <!-- SETUP SCREEN: shown only until this device is linked -->
+  <div class="setup" id="setupScreen" style="display:none;">
+    <h1>Welcome</h1>
+    <p>Ask your family for the connection code, then type it below to see today's medicines.</p>
+    <input type="text" id="codeInput" class="code-input" placeholder="ABC123" maxlength="6" autocomplete="off" inputmode="text">
+    <button class="big-btn" id="connectBtn">Connect</button>
+    <div class="setup-error" id="setupError"></div>
+  </div>
+
+  <!-- MAIN SCREEN: today's doses -->
+  <div id="mainScreen" style="display:none;">
+    <div class="date-header">
+      <p class="day" id="dayLabel"></p>
+      <p class="date" id="dateLabel"></p>
+    </div>
+    <div id="doseList"></div>
+  </div>
+
+  <div class="loading-state" id="loadingState">Loading…</div>
+</div>
+
+<script type="module">
+  // ---------------------------------------------------------------------------
+  // FIREBASE INIT — Elderly Care project (elderly-care-cf91c), separate from
+  // Stall's Firebase project.
+  // ---------------------------------------------------------------------------
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getFirestore, doc, getDoc, updateDoc, setDoc, collection, query, where, getDocs, arrayUnion, serverTimestamp,
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import {
+    getAuth, signInAnonymously, onAuthStateChanged,
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAPH9j8Cqdj3K_Cvl4LI4cOL56rZmRRyY8",
+    authDomain: "elderly-care-cf91c.firebaseapp.com",
+    projectId: "elderly-care-cf91c",
+    storageBucket: "elderly-care-cf91c.firebasestorage.app",
+    messagingSenderId: "93058455408",
+    appId: "1:93058455408:web:905193af163a72dbc3a1b5",
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const auth = getAuth(app);
+
+  const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const LOCAL_KEY = "eldercare_profile_id";
+
+  const setupScreen = document.getElementById("setupScreen");
+  const mainScreen = document.getElementById("mainScreen");
+  const loadingState = document.getElementById("loadingState");
+  const codeInput = document.getElementById("codeInput");
+  const connectBtn = document.getElementById("connectBtn");
+  const setupError = document.getElementById("setupError");
+  const doseList = document.getElementById("doseList");
+  const dayLabel = document.getElementById("dayLabel");
+  const dateLabel = document.getElementById("dateLabel");
+  const timeGlow = document.getElementById("timeGlow");
+
+  // Ambient time-of-day glow — purely visual, orients the reader at a glance.
+  const hour = new Date().getHours();
+  timeGlow.style.background =
+    hour < 12 ? "var(--glow-morning)" : hour < 17 ? "var(--glow-afternoon)" : "var(--glow-evening)";
+
+  let currentUser = null;
+  let profileId = localStorage.getItem(LOCAL_KEY);
+
+  onAuthStateChanged(auth, (user) => {
+    if (user) {
+      currentUser = user;
+      boot();
+    } else {
+      signInAnonymously(auth).catch((err) => {
+        loadingState.textContent = "Couldn't connect — check your internet and reload this page.";
+        console.error(err);
+      });
+    }
+  });
+
+  async function boot() {
+    if (profileId) {
+      const ok = await verifyLinkedAccess(profileId);
+      if (ok) { showMainScreen(); return; }
+      // Stored profile ID is stale/revoked — fall back to setup.
+      localStorage.removeItem(LOCAL_KEY);
+      profileId = null;
+    }
+    loadingState.style.display = "none";
+    setupScreen.style.display = "flex";
+  }
+
+  async function verifyLinkedAccess(id) {
+    try {
+      const snap = await getDoc(doc(db, "seniorProfiles", id));
+      if (!snap.exists()) return false;
+      const data = snap.data();
+      return Array.isArray(data.linkedDeviceUids) && data.linkedDeviceUids.includes(currentUser.uid);
+    } catch {
+      return false;
+    }
+  }
+
+  connectBtn.addEventListener("click", async () => {
+    const code = codeInput.value.trim().toUpperCase();
+    setupError.textContent = "";
+    if (!code) return;
+    connectBtn.disabled = true;
+    connectBtn.textContent = "Connecting…";
+    try {
+      const inviteSnap = await getDoc(doc(db, "inviteCodes", code));
+      if (!inviteSnap.exists()) {
+        setupError.textContent = "That code didn't match anything. Please check it and try again.";
+        return;
+      }
+      const targetProfileId = inviteSnap.data().profileId;
+      await updateDoc(doc(db, "seniorProfiles", targetProfileId), {
+        linkedDeviceUids: arrayUnion(currentUser.uid),
+      });
+      localStorage.setItem(LOCAL_KEY, targetProfileId);
+      profileId = targetProfileId;
+      setupScreen.style.display = "none";
+      showMainScreen();
+    } catch (err) {
+      console.error(err);
+      setupError.textContent = "Something went wrong. Please try again.";
+    } finally {
+      connectBtn.disabled = false;
+      connectBtn.textContent = "Connect";
+    }
+  });
+
+  async function showMainScreen() {
+    const now = new Date();
+    dayLabel.textContent = DAY_NAMES[now.getDay()];
+    dateLabel.textContent = now.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+    loadingState.style.display = "none";
+    mainScreen.style.display = "block";
+    await renderDoses(now);
+  }
+
+  async function renderDoses(now) {
+    const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    const dayName = DAY_NAMES[now.getDay()];
+
+    const medsSnap = await getDocs(collection(db, "seniorProfiles", profileId, "medications"));
+    const doses = [];
+    medsSnap.forEach((d) => {
+      const med = d.data();
+      if (med.active === false) return;
+      const days = med.daysOfWeek && med.daysOfWeek.length ? med.daysOfWeek : DAY_NAMES;
+      if (!days.includes(dayName)) return;
+      (med.times || []).forEach((time) => {
+        doses.push({ medId: d.id, name: med.name, dosage: med.dosage, time });
+      });
+    });
+    doses.sort((a, b) => to24h(a.time) - to24h(b.time));
+
+    if (doses.length === 0) {
+      doseList.innerHTML = '<div class="empty-state">No medicines scheduled for today.</div>';
+      return;
+    }
+
+    doseList.innerHTML = "";
+    for (const dose of doses) {
+      const logId = `${dose.medId}_${dateStr}_${dose.time.replace(/[^A-Za-z0-9]/g, "")}`;
+      const logSnap = await getDoc(doc(db, "seniorProfiles", profileId, "medicationLogs", logId));
+      const isTaken = logSnap.exists() && logSnap.data().status === "taken";
+
+      const card = document.createElement("div");
+      card.className = "dose-card" + (isTaken ? " is-taken" : "");
+      card.innerHTML = `
+        <div class="dose-time">${dose.time}</div>
+        <div class="dose-info">
+          <div class="dose-name">${escapeHtml(dose.name)}</div>
+          <div class="dose-dosage">${escapeHtml(dose.dosage || "")}</div>
+        </div>
+        ${isTaken
+          ? `<button class="dose-btn taken-label" disabled>✓ Taken</button>`
+          : `<button class="dose-btn" data-log-id="${logId}" data-med-id="${dose.medId}" data-time="${dose.time}">Mark Taken</button>`
+        }
+      `;
+      doseList.appendChild(card);
+    }
+
+    doseList.querySelectorAll(".dose-btn:not(.taken-label)").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        btn.textContent = "Saving…";
+        try {
+          await setDoc(doc(db, "seniorProfiles", profileId, "medicationLogs", btn.dataset.logId), {
+            medicationId: btn.dataset.medId,
+            scheduledFor: dateStr,
+            time: btn.dataset.time,
+            status: "taken",
+            takenAt: serverTimestamp(),
+          });
+          await renderDoses(new Date());
+        } catch (err) {
+          console.error(err);
+          btn.disabled = false;
+          btn.textContent = "Mark Taken";
+        }
+      });
+    });
+  }
+
+  function to24h(t) {
+    const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!m) return 0;
+    let h = parseInt(m[1], 10) % 12;
+    if (/pm/i.test(m[3])) h += 12;
+    return h * 60 + parseInt(m[2], 10);
+  }
+
+  function escapeHtml(str) {
+    const d = document.createElement("div");
+    d.textContent = str;
+    return d.innerHTML;
+  }
+</script>
+</body>
+</html>
